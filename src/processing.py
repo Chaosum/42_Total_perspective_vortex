@@ -22,13 +22,11 @@ class Processing:
             raise FileNotFoundError(f"Fichier EDF introuvable : {file_path}")
 
         raw = mne.io.read_raw_edf(file_path, preload=True, stim_channel='auto')
-        raw = raw.filter(7., 30., fir_design='firwin')
         print(f"✅ Run {run_id} chargée pour {subject_id}")
         return raw
 
     def extract_epochs_for_run(self, raw, run):
         events, event_id = mne.events_from_annotations(raw)
-
         # On garde uniquement T1 et T2
         filtered_event_id = {k: v for k, v in event_id.items() if k in ["T1", "T2"]}
 
@@ -60,6 +58,7 @@ class Processing:
             for run, _ in useful_runs.items():
                 try:
                     raw_data = self.load_subject_run(subject_id, run)
+                    raw_data = raw_data.filter(7., 30., fir_design='firwin')
                     subject[subject_id][run] = self.extract_epochs_for_run(raw_data, run)
                     print(f"✅ {subject_id} run {run} chargée.")
                 except Exception as e:
@@ -78,8 +77,8 @@ class Processing:
     def extract_features_from_epoch(self, epoch, wavelet='db4', level=3):
         all_features = []
         for channel in epoch:  # channel.shape = (n_times,)
-            feats = self.extract_features_from_channel(channel, wavelet, level)
-            all_features.extend(feats)
+            features = self.extract_features_from_channel(channel, wavelet, level)
+            all_features.extend(features)
         return np.array(all_features)
 
 
@@ -98,11 +97,4 @@ if __name__ == "__main__":
     X_total = np.array(X_total)  # shape (n_samples, n_channels, n_times)
     X_wavelet = [p.extract_features_from_epoch(epoch) for epoch in X_total]
     X_wavelet = np.array(X_wavelet)
-
-
-
-
-
-    # raw_s001.plot(duration=10, n_channels=16, scalings='auto')
-    # plt.show()
 
