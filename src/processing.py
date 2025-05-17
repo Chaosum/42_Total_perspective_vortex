@@ -4,13 +4,21 @@ from matplotlib import pyplot as plt
 import mne
 import numpy as np
 import pywt
+import MyCSP
+import MyPCA
 from global_variable import *
+import sklearn
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_score
+import joblib
+from waveletsTransformer import WaveletTransformer
 
 class Processing:
     def __init__(self):
         self._data = {}
     
-    def load_subject_run(self, subject_id: int, run_id: int):
+    def load_subject_run(self, subject_id: str, run_id: int):
         """
         Charge une seule run (par fichier .edf) pour un sujet donné.
         """
@@ -26,6 +34,9 @@ class Processing:
         return raw
 
     def extract_epochs_for_run(self, raw, run):
+        if len(set(y)) < 2:
+            print(f"⚠️ Run {run} ignoré : seulement une classe présente.")
+            return [], []
         events, event_id = mne.events_from_annotations(raw)
         # On garde uniquement T1 et T2
         filtered_event_id = {k: v for k, v in event_id.items() if k in ["T1", "T2"]}
@@ -52,7 +63,7 @@ class Processing:
     
     def setup_data (self):
         subject = {}
-        for i in range(10):
+        for i in range(109):
             subject_id = f"S{i + 1:03}"
             subject[subject_id] = {}
             for run, _ in useful_runs.items():
@@ -64,37 +75,18 @@ class Processing:
                 except Exception as e:
                     print(f"❌ Erreur pour {subject_id} run {run} : {e}")
         return subject
-
-    def extract_features_from_channel(self, signal, wavelet='db4', level=3):
-        coeffs = pywt.wavedec(signal, wavelet, level=level)
-        features = []
-        for c in coeffs:
-            features.append(np.mean(np.abs(c)))         # moyenne absolue
-            features.append(np.std(c))                  # écart-type
-            features.append(np.sum(np.square(c)))       # énergie
-        return features
-
-    def extract_features_from_epoch(self, epoch, wavelet='db4', level=3):
-        all_features = []
-        for channel in epoch:  # channel.shape = (n_times,)
-            features = self.extract_features_from_channel(channel, wavelet, level)
-            all_features.extend(features)
-        return np.array(all_features)
-
-
-if __name__ == "__main__":
-    p = Processing()
-
-    subject = p.setup_data()
     
-    X_total = [] # toutes les epochs de tous les runs
-    y_total = [] # la liste des labels correspondants
-    for subject_id in subject:
-        for run_id in subject[subject_id]:
-            X, y = subject[subject_id][run_id]
-            X_total.extend(X)
-            y_total.extend(y)
-    X_total = np.array(X_total)  # shape (n_samples, n_channels, n_times)
-    X_wavelet = [p.extract_features_from_epoch(epoch) for epoch in X_total]
-    X_wavelet = np.array(X_wavelet)
+    def get_all_data(self):
+        subject = self.setup_data()
+        
+        X_total = []
+        y_total = []
+        for subject_id in subject:
+            for run_id in subject[subject_id]:
+                X, y = subject[subject_id][run_id]
+                X_total.extend(X)
+                y_total.extend(y)
 
+        X_total = np.array(X_total)
+        y_total = np.array(y_total)
+        return X_total, y_total

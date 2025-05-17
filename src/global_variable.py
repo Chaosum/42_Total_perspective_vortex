@@ -60,11 +60,18 @@ T_meaning = {
     }
 
 }
+# useful_runs = {run_id: {"desc": "description", "T1": "T1_label", "T2": "T2_label"}}
 useful_runs = {
-    4:  {"desc": "imagine opening/closing left or right fist", "T1": "left_fist",   "T2": "right_fist"},
-    6:  {"desc": "imagine opening/closing both fists or feet", "T1": "both_fists",  "T2": "both_feet"},
-    7:  {"desc": "imagine left or right fist",                 "T1": "left_fist",   "T2": "right_fist"},
-    8:  {"desc": "imagine left or right foot",                 "T1": "left_foot",   "T2": "right_foot"},
-    9:  {"desc": "imagine fists vs feet",                      "T1": "both_fists",  "T2": "both_feet"},
-    10: {"desc": "imagine left or right fist",                 "T1": "left_fist",   "T2": "right_fist"},
+    3:  {"desc": "real movement of left/right fist",          "T1": "left_fist",   "T2": "right_fist"},
+    4:  {"desc": "imagine opening/closing left/right fist",   "T1": "left_fist",   "T2": "right_fist"},
+    5:  {"desc": "real movement of both fists vs feet",       "T1": "both_fists",  "T2": "both_feet"},
+    6:  {"desc": "imagine opening/closing both fists or feet","T1": "both_fists",  "T2": "both_feet"},
+    7:  {"desc": "imagine left or right fist",                "T1": "left_fist",   "T2": "right_fist"},
+    8:  {"desc": "imagine left or right foot",                "T1": "left_foot",   "T2": "right_foot"},
+    9:  {"desc": "imagine fists vs feet",                     "T1": "both_fists",  "T2": "both_feet"},
+    10: {"desc": "imagine left or right fist",                "T1": "left_fist",   "T2": "right_fist"},
+    11: {"desc": "imagine left or right fist",                "T1": "left_fist",   "T2": "right_fist"},
+    12: {"desc": "imagine left or right fist",                "T1": "left_fist",   "T2": "right_fist"},
+    13: {"desc": "imagine both fists or both feet",           "T1": "both_fists",  "T2": "both_feet"},
+    14: {"desc": "imagine both fists or both feet",           "T1": "both_fists",  "T2": "both_feet"}
 }
