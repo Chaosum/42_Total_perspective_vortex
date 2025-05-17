@@ -1,0 +1,7 @@
+BEAUCOUP de Clean code
+
+mybci sans arg
+
+repasser sur le sujet pour voir si tout est ok
+
+commentaires ou doc pour comprendre et savoir reexpliquer tout

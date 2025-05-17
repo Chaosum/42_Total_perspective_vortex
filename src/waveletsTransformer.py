@@ -10,7 +10,7 @@ class WaveletTransformer(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
         return self
 
-    def transform(self, X):
+    def transform(self, X, y=None):
         features = []
         for epoch in X:  # shape: (n_channels, n_times)
             epoch_features = []

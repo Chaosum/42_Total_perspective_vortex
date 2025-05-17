@@ -1,12 +1,13 @@
 import numpy as np
+from sklearn.base import BaseEstimator, TransformerMixin
 
-class MyPCA:
+class MyPCA (BaseEstimator, TransformerMixin):
 	def __init__(self, n_components=None):
 		self.n_components = n_components
 		self.components_ = None
 		self.mean_ = None
 
-	def fit(self, X):
+	def fit(self, X, y=None):
 		# Center the data
 		self.mean_ = np.mean(X, axis=0)
 		X_centered = X - self.mean_
@@ -24,10 +25,10 @@ class MyPCA:
 			eig_vecs = eig_vecs[:, :self.n_components]
 		self.components_ = eig_vecs
 
-	def transform(self, X):
+	def transform(self, X, y=None):
 		X_centered = X - self.mean_
 		return X_centered @ self.components_ # return np.dot = @ = produit matriciel
 
-	def fit_transform(self, X):
+	def fit_transform(self, X, y=None):
 		self.fit(X)
 		return self.transform(X)

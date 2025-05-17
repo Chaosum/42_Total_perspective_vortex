@@ -2,13 +2,15 @@ import sys
 import os
 import numpy as np
 import joblib
+from predict import predict
 from processing import Processing
 from global_variable import useful_runs
+from train import train
 
 def eval_subject_run(subject_id, run_id, wavelet_pipeline, csp_pipeline, clf):
     subject_str = f"S{subject_id:03}"
     p = Processing()
-    data = p.setup_data([subject_str], [run_id])
+    data = p.setup_data(subject_id, run_id)
 
     X_total = []
     y_total = []
@@ -74,13 +76,10 @@ if __name__ == "__main__":
         print(f"❌ Run must be one of: {list(useful_runs.keys())}")
         sys.exit(1)
 
-    os.environ["BCI_SUBJECT"] = f"S{subject:03}"
-    os.environ["BCI_RUN"] = str(run)
-
     if mode == "train":
-        os.system("python train.py")
+        train(subject, run)
     elif mode == "predict":
-        os.system("python predict.py")
+        predict()
     else:
         print("❌ Mode must be 'train' or 'predict'")
         sys.exit(1)

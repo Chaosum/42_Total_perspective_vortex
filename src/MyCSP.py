@@ -10,7 +10,7 @@ class MyCSP(BaseEstimator, TransformerMixin):
         cov = epoch @ epoch.T
         return cov / np.trace(cov)
     
-    def fit(self, X, y):
+    def fit(self, X, y=None):
         classes = np.unique(y)
         if len(classes) != 2:
             raise ValueError("CSP requires exactly two classes.")
@@ -33,7 +33,7 @@ class MyCSP(BaseEstimator, TransformerMixin):
         self.filters_ = filters[:self.n_components]
         return self
 
-    def transform(self, X):
+    def transform(self, X, y=None):
         transformed = []
         for epoch in X:
             Z = self.filters_ @ epoch  # shape: (n_components, n_times)
