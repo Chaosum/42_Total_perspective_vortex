@@ -1,13 +1,10 @@
+import shutil
 import os
-import random
 from matplotlib import pyplot as plt
 import mne
 import numpy as np
-import pywt
-import MyCSP
-import MyPCA
+from mne.datasets import eegbci
 from global_variable import *
-import sklearn
 from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score
@@ -27,7 +24,10 @@ class Processing:
         file_path = os.path.join(BASE_PATH, subject_id, filename)
 
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Fichier EDF introuvable : {file_path}")
+            subj_num = int(subject_id[1:])  # 'S014' -> 14
+            print(f"📥 Téléchargement du sujet {subject_id}, run {run_id}...")
+            mne.set_config("MNE_DATA", os.path.abspath("./data/"))
+            eegbci.load_data(subj_num, [run_id])
 
         raw = mne.io.read_raw_edf(file_path, preload=True, stim_channel='auto')
         print(f"✅ Run {run_id} chargée pour {subject_id}")

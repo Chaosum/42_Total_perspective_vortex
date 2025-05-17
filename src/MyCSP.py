@@ -6,6 +6,10 @@ class MyCSP(BaseEstimator, TransformerMixin):
         self.n_components = n_components
         self.filters_ = None
 
+    def compute_cov(self, epoch):
+        cov = epoch @ epoch.T
+        return cov / np.trace(cov)
+    
     def fit(self, X, y):
         classes = np.unique(y)
         if len(classes) != 2:
@@ -14,12 +18,8 @@ class MyCSP(BaseEstimator, TransformerMixin):
         class_1 = X[y == classes[0]]
         class_2 = X[y == classes[1]]
 
-        def compute_cov(epoch):
-            cov = epoch @ epoch.T
-            return cov / np.trace(cov)
-
-        cov_1 = np.mean([compute_cov(e) for e in class_1], axis=0)
-        cov_2 = np.mean([compute_cov(e) for e in class_2], axis=0)
+        cov_1 = np.mean([self.compute_cov(e) for e in class_1], axis=0)
+        cov_2 = np.mean([self.compute_cov(e) for e in class_2], axis=0)
 
         cov_total = cov_1 + cov_2
         eigvals, eigvecs = np.linalg.eigh(cov_total)
