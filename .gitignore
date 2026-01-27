@@ -1,7 +1,43 @@
-./venv
-./venv/*
-./src/venv
-./src/venv/*
-./src/__pycache__/
-./src/__pycache__/*
-/data/
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+src/venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# MNE / dataset (local data)
+data/
+src/data/
+
+# Caches
+.pytest_cache/
+.mypy_cache/
+
+# IDEs
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs and temp
+*.log
+*.tmp
+
+# Shared object / binaries
+*.so
+*.dylib
+*.dll
+
+# OS files
+.DS_Store
