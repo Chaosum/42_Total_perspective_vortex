@@ -1,7 +1,7 @@
 from collections import Counter 
 import numpy as np
 import joblib
-from sklearn.discriminant_analysis import StandardScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix
@@ -104,3 +104,19 @@ def train(subject_id = None, run_id=None):
     joblib.dump(clf_final, "classifier.pkl")
     joblib.dump(label_encoder, "label_encoder.pkl")
     print("✅ Modèles sauvegardés avec succès.")
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 3:
+        print("Usage: python train.py <subject_num> <run_num>")
+        sys.exit(1)
+
+    try:
+        subject = int(sys.argv[1])
+        run = int(sys.argv[2])
+    except ValueError:
+        print("Both subject and run must be integers")
+        sys.exit(1)
+
+    train(subject, run)

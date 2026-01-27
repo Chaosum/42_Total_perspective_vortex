@@ -13,7 +13,7 @@ PIP := $(VENV_NAME)/bin/pip
 setup:
 	@if [ ! -d "$(VENV_NAME)" ]; then \
 		echo "Création du venv..."; \
-		python -m venv $(VENV_NAME); \
+		python3 -m venv $(VENV_NAME); \
 	else \
 		echo "✅ venv déjà présent."; \
 	fi
