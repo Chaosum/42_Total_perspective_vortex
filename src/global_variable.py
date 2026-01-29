@@ -60,18 +60,28 @@ T_meaning = {
     }
 
 }
-# useful_runs = {run_id: {"desc": "description", "T1": "T1_label", "T2": "T2_label"}}
+# useful_runs = {run_id: {"desc": "description", "task": <1-4>, "modal": "real"/"imagery", "T1": "label_T1", "T2": "label_T2"}}
+# Mapping mis au propre à partir de la description officielle PhysioNet.
 useful_runs = {
-    3:  {"desc": "real movement of left/right fist",          "T1": "left_fist",   "T2": "right_fist"},
-    4:  {"desc": "imagine opening/closing left/right fist",   "T1": "left_fist",   "T2": "right_fist"},
-    5:  {"desc": "real movement of both fists vs feet",       "T1": "both_fists",  "T2": "both_feet"},
-    6:  {"desc": "imagine opening/closing both fists or feet","T1": "both_fists",  "T2": "both_feet"},
-    7:  {"desc": "imagine left or right fist",                "T1": "left_fist",   "T2": "right_fist"},
-    8:  {"desc": "imagine left or right foot",                "T1": "left_foot",   "T2": "right_foot"},
-    9:  {"desc": "imagine fists vs feet",                     "T1": "both_fists",  "T2": "both_feet"},
-    10: {"desc": "imagine left or right fist",                "T1": "left_fist",   "T2": "right_fist"},
-    11: {"desc": "imagine left or right fist",                "T1": "left_fist",   "T2": "right_fist"},
-    12: {"desc": "imagine left or right fist",                "T1": "left_fist",   "T2": "right_fist"},
-    13: {"desc": "imagine both fists or both feet",           "T1": "both_fists",  "T2": "both_feet"},
-    14: {"desc": "imagine both fists or both feet",           "T1": "both_fists",  "T2": "both_feet"}
+    # Baselines (runs 1–2) ne sont pas utilisés pour la classification
+
+    # Task 1 : gauche/droite, mouvement RÉEL des mains
+    3:  {"desc": "Task 1 - real left/right fist",      "task": 1, "modal": "real",    "T1": "left_fist",   "T2": "right_fist"},
+    7:  {"desc": "Task 1 - real left/right fist",      "task": 1, "modal": "real",    "T1": "left_fist",   "T2": "right_fist"},
+    11: {"desc": "Task 1 - real left/right fist",      "task": 1, "modal": "real",    "T1": "left_fist",   "T2": "right_fist"},
+
+    # Task 2 : gauche/droite, mouvement IMAGINAIRE des mains
+    4:  {"desc": "Task 2 - imagery left/right fist",   "task": 2, "modal": "imagery", "T1": "left_fist",   "T2": "right_fist"},
+    8:  {"desc": "Task 2 - imagery left/right fist",   "task": 2, "modal": "imagery", "T1": "left_fist",   "T2": "right_fist"},
+    12: {"desc": "Task 2 - imagery left/right fist",   "task": 2, "modal": "imagery", "T1": "left_fist",   "T2": "right_fist"},
+
+    # Task 3 : mains vs pieds, mouvement RÉEL
+    5:  {"desc": "Task 3 - real hands vs feet",        "task": 3, "modal": "real",    "T1": "both_fists",  "T2": "both_feet"},
+    9:  {"desc": "Task 3 - real hands vs feet",        "task": 3, "modal": "real",    "T1": "both_fists",  "T2": "both_feet"},
+    13: {"desc": "Task 3 - real hands vs feet",        "task": 3, "modal": "real",    "T1": "both_fists",  "T2": "both_feet"},
+
+    # Task 4 : mains vs pieds, mouvement IMAGINAIRE
+    6:  {"desc": "Task 4 - imagery hands vs feet",     "task": 4, "modal": "imagery", "T1": "both_fists",  "T2": "both_feet"},
+    10: {"desc": "Task 4 - imagery hands vs feet",     "task": 4, "modal": "imagery", "T1": "both_fists",  "T2": "both_feet"},
+    14: {"desc": "Task 4 - imagery hands vs feet",     "task": 4, "modal": "imagery", "T1": "both_fists",  "T2": "both_feet"},
 }
