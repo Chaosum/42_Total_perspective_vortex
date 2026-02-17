@@ -35,6 +35,14 @@ def eval_subject_run(subject_id, run_id, wavelet_pipeline, csp_pipeline, clf):
 if __name__ == "__main__":
     # === Mode 1 : sans argument → test global sur 6 expériences ===
     if len(sys.argv) == 1:
+        EXPERIMENT_TYPES: dict[int, dict] = {
+            0: {"name": "task1_real_left_right", "runs": [3, 7, 11]},
+            1: {"name": "task2_imagery_left_right", "runs": [4, 8, 12]},
+            2: {"name": "task3_real_hands_vs_feet", "runs": [5, 9, 13]},
+            3: {"name": "task4_imagery_hands_vs_feet", "runs": [6, 10, 14]},
+            4: {"name": "all_imagery_tasks", "runs": [4, 8, 12, 6, 10, 14]},
+            5: {"name": "all_real_tasks", "runs": [3, 7, 11, 5, 9, 13]},
+        }
         main_experiments = [4, 6, 7, 8, 9, 10]  # runs choisis
         wavelet_pipeline = joblib.load("wavelet_pipeline.pkl")
         csp_pipeline = joblib.load("csp_pipeline.pkl")

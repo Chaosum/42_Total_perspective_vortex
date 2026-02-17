@@ -33,6 +33,25 @@ src/data/
 # Logs and temp
 *.log
 *.tmp
+nohup.out
+train_loro.log
+
+# Models (generated files, can be large)
+models/
+*.joblib
+*.pkl
+*.h5
+*.pt
+*.pth
+
+# Results
+results/
+
+# EEG data formats
+*.edf
+*.fif
+*.set
+*.mat
 
 # Shared object / binaries
 *.so
@@ -41,3 +60,9 @@ src/data/
 
 # OS files
 .DS_Store
+Thumbs.db
+
+# Images and plots
+*.png
+*.pdf
+*.svg
