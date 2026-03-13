@@ -13,17 +13,34 @@ import os
 from processing import Processing
 
 
-def load_subject_model(subject_id, task_name="left_right"):
-    """Charge le modèle d'un sujet spécifique."""
-    
-    model_path = f"models/subject_specific/{task_name}/subject_{subject_id:03}.pkl"
-    
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Modèle non trouvé: {model_path}\n"
-                                f"Entraînez d'abord avec train_subject_specific_main.py")
-    
-    model = joblib.load(model_path)
-    return model
+def load_subject_model(subject_id, task_name="left_right", test_run=None):
+    """Charge le modèle d'un sujet spécifique (pipeline leave_one_run_out)."""
+
+    base = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "models", "leave_one_run_out", task_name
+    )
+
+    if test_run is not None:
+        model_path = os.path.join(base, f"subject_{subject_id:03d}_testrun_{test_run}.pkl")
+    else:
+        # Cherche le premier modèle disponible pour ce sujet
+        test_runs = {"left_right": [4, 8, 12], "hands_feet": [6, 10, 14]}[task_name]
+        model_path = None
+        for r in test_runs:
+            candidate = os.path.join(base, f"subject_{subject_id:03d}_testrun_{r}.pkl")
+            if os.path.exists(candidate):
+                model_path = candidate
+                break
+
+    if model_path is None or not os.path.exists(model_path):
+        raise FileNotFoundError(
+            f"Modèle non trouvé pour sujet {subject_id:03d}, tâche {task_name}.\n"
+            f"Entraînez d'abord avec : python mybci.py train --subject {subject_id} --task {task_name}"
+        )
+
+    return joblib.load(model_path)
+
 
 
 def predict_subject(subject_id, run_id, task_name="left_right"):
@@ -47,9 +64,9 @@ def predict_subject(subject_id, run_id, task_name="left_right"):
     print(f"Tâche: {task_name}")
     print("="*70)
     
-    # Charger le modèle du sujet
+    # Charger le modèle du sujet (modèle dédié à ce run de test)
     print(f"\n📦 Chargement du modèle du sujet {subject_id:03}...")
-    model = load_subject_model(subject_id, task_name)
+    model = load_subject_model(subject_id, task_name, test_run=run_id)
     
     csp = model['csp']
     scaler = model['scaler']
@@ -58,13 +75,13 @@ def predict_subject(subject_id, run_id, task_name="left_right"):
     
     print(f"✅ Modèle chargé")
     print(f"   Classes: {le.classes_}")
-    print(f"   Entraîné avec runs: {model['calibration_runs']}")
-    print(f"   Score calibration: {model['train_score']:.4f}")
     
     # Charger les données
     print(f"\n📊 Chargement des données...")
     p = Processing()
-    X, y = p.get_all_data(subject_id, run_id)
+    data = p.setup_data(subject_id, run_id)
+    subject_str = f"S{subject_id:03d}"
+    X, y = data[subject_str][run_id]
     
     if len(X) == 0:
         print("❌ Aucune donnée disponible")
@@ -72,9 +89,7 @@ def predict_subject(subject_id, run_id, task_name="left_right"):
     
     print(f"✅ {len(X)} epochs chargés")
     
-    # Uniformiser
-    min_length = min(x.shape[1] for x in X)
-    X_uniform = np.array([x[:, :min_length] for x in X])
+    X_uniform = np.array(X)
     
     # Transformer et prédire
     print(f"\n🔧 Transformation et prédiction...")
@@ -91,6 +106,7 @@ def predict_subject(subject_id, run_id, task_name="left_right"):
     y_true_enc = le.transform(y_true)
     
     accuracy = np.mean(y_pred == y_true_enc)
+
     
     print(f"✅ Prédictions effectuées")
     
@@ -144,9 +160,7 @@ def evaluate_subject_all_runs(subject_id, task_name="left_right"):
     print(f"🧪 ÉVALUATION COMPLÈTE - SUJET {subject_id:03}")
     print("="*70)
     
-    # Charger le modèle
-    model = load_subject_model(subject_id, task_name)
-    test_runs = model['test_runs']
+    test_runs = {"left_right": [4, 8, 12], "hands_feet": [6, 10, 14]}[task_name]
     
     print(f"Tâche: {task_name}")
     print(f"Runs de test: {test_runs}\n")
@@ -166,6 +180,7 @@ def evaluate_subject_all_runs(subject_id, task_name="left_right"):
         print(f"Mean accuracy: {np.mean(scores):.4f} ± {np.std(scores):.4f}")
         print(f"Runs testées: {len(scores)}/{len(test_runs)}")
         print("="*70)
+
 
 
 def main():

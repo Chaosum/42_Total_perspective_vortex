@@ -10,11 +10,18 @@ import joblib
 import numpy as np
 import matplotlib.pyplot as plt
 
+# Importer les classes personnalisées pour le unpickling
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'OLD', 'myImplementation'))
+from MyCSP import MyCSP
+from MyPCA import MyPCA
+from MyLogisticRegression import MyLogisticRegression
+
 
 def load_all_results(task_name="left_right"):
     """Charge tous les résultats d'une tâche."""
     
-    model_dir = f"models/subject_specific/{task_name}"
+    model_dir = "models"
     
     if not os.path.exists(model_dir):
         print(f"❌ Répertoire non trouvé: {model_dir}")
@@ -25,14 +32,15 @@ def load_all_results(task_name="left_right"):
     for filename in sorted(os.listdir(model_dir)):
         if filename.endswith('.pkl'):
             filepath = os.path.join(model_dir, filename)
-            model = joblib.load(filepath)
-            results.append({
-                'subject_id': model['subject_id'],
-                'train_score': model['train_score'],
-                'test_score': model['test_score'],
-                'calibration_runs': model['calibration_runs'],
-                'test_runs': model['test_runs']
-            })
+            model_data = joblib.load(filepath)
+            if 'test_score' in model_data and model_data.get('cv_score') is not None:
+                results.append({
+                    'subject_id': model_data['subject'],
+                    'train_score': model_data['cv_score'],
+                    'test_score': model_data['test_score'],
+                    'calibration_runs': [1, 2],
+                    'test_runs': [3]
+                })
     
     return results
 

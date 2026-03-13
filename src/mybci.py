@@ -1,170 +1,183 @@
-"""Script principal BCI : entraînement et évaluation avec le pipeline complet.
-
-Deux modes principaux :
-- sans argument    → évaluation globale sur les 6 types d'expériences définis à partir des runs EEGMMI ;
-- avec arguments   → `python mybci.py <subject> <run> train` (pour lancer l'entraînement de base).
-
-Remarque importante :
-- dans une version avancée, on entraînera un modèle dédié par type et on les sauvera
-    sous des noms du style `full_pipeline_type{type_id}.pkl`.
-- pour l'instant, ce script illustre la structure d'évaluation par type en
-    utilisant un unique fichier `full_pipeline.pkl` sauvegardé par `train.py`.
-"""
 
 import sys
+import os
 import numpy as np
 import joblib
+# from processing import Processing
+# from utils import cross_val_score_pipeline
 
-from processing import Processing
-from global_variable import useful_runs
-from train import train
+# Définition des expériences (run, classes)
+EXPERIMENTS = [
+    {"id": 0, "run": 3, "classes": ("left_fist", "right_fist")},
+    {"id": 1, "run": 4, "classes": ("left_fist", "right_fist")},
+    {"id": 2, "run": 5, "classes": ("both_fists", "both_feet")},
+    {"id": 3, "run": 6, "classes": ("both_fists", "both_feet")},
+    {"id": 4, "run": 7, "classes": ("left_fist", "right_fist")},
+    {"id": 5, "run": 8, "classes": ("left_foot", "right_foot")},
+]
 
-
-# Définition des 6 types d'expériences à partir des runs de l'EEGMMI
-# cf. description PhysioNet :
-# - Task 1 : gauche/droite, mouvement réel des mains    → runs 3, 7, 11
-# - Task 2 : gauche/droite, mouvement imaginaire mains  → runs 4, 8, 12
-# - Task 3 : mains vs pieds, mouvement réel             → runs 5, 9, 13
-# - Task 4 : mains vs pieds, mouvement imaginaire       → runs 6, 10, 14
-#
-# Nous définissons 6 "types" comme demandé dans le sujet :
-#   0 : Task 1 et répliques
-#   1 : Task 2 et répliques
-#   2 : Task 3 et répliques
-#   3 : Task 4 et répliques
-#   4 : Toutes les tâches avec mouvement imaginaire (Task 2 + Task 4)
-#   5 : Toutes les tâches avec mouvement réel       (Task 1 + Task 3)
-
-EXPERIMENT_TYPES: dict[int, dict] = {
-    0: {"name": "task1_real_left_right", "runs": [3, 7, 11]},
-    1: {"name": "task2_imagery_left_right", "runs": [4, 8, 12]},
-    2: {"name": "task3_real_hands_vs_feet", "runs": [5, 9, 13]},
-    3: {"name": "task4_imagery_hands_vs_feet", "runs": [6, 10, 14]},
-    4: {"name": "all_imagery_tasks", "runs": [4, 8, 12, 6, 10, 14]},
-    5: {"name": "all_real_tasks", "runs": [3, 7, 11, 5, 9, 13]},
-}
+MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
+os.makedirs(MODEL_DIR, exist_ok=True)
 
 
-def eval_subject_run(subject_id: int, run_id: int, full_pipeline) -> float | None:
-    """Évalue la précision du pipeline complet sur un sujet + run donnés.
-
-    On récupère les epochs via Processing, puis on appelle simplement
-    `full_pipeline.score(X, y)`.
+def train(subject, experiment):
     """
+    Entraîne un pipeline sklearn pour un sujet et une expérience (catégorie).
+    """
+    from processing import Processing
+    from sklearn.decomposition import PCA
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import Pipeline
+    from sklearn.model_selection import cross_val_score
+    import joblib
+    import os
 
-    subject_str = f"S{subject_id:03}"
+    # Associer expérience à run et classes
+    exp = EXPERIMENTS[experiment]
+    run = exp["run"]
+    print(f"[TRAIN] Sujet {subject:03d} | Expérience {experiment} | Run {run}")
+
+    # Charger les données
     p = Processing()
-    data = p.setup_data(subject_id, run_id)
-
-    X_total = []
-    y_total = []
-    for run in data[subject_str]:
-        X, y = data[subject_str][run]
-        X_total.extend(X)
-        y_total.extend(y)
-
-    if len(set(y_total)) < 2:
-        # Si on n'a qu'une seule classe, on ne peut pas calculer une accuracy pertinente
-        return None
-
-    X_total = np.array(X_total)
-    y_total = np.array(y_total)
-
-    acc = full_pipeline.score(X_total, y_total)
-    return float(acc)
-
-
-def main_no_args():
-    """Mode sans argument : évaluation globale sur les 6 types d'expérience.
-
-    Pour l'instant, on charge un unique `full_pipeline.pkl` et on l'évalue
-    sur chaque type défini dans EXPERIMENT_TYPES. À terme, on pourra
-    utiliser un pipeline dédié par type (ex: `full_pipeline_type{i}.pkl`).
-    """
-
-    try:
-        full_pipeline = joblib.load("full_pipeline.pkl")
-    except FileNotFoundError:
-        print("❌ full_pipeline.pkl introuvable. Lance d'abord 'python src/train.py <subject> <run>'.")
-        sys.exit(1)
-
-    type_accuracies: dict[int, float] = {}
-
-    # Boucle sur les 6 types définis plus haut
-    for type_id, info in EXPERIMENT_TYPES.items():
-        type_name = info["name"]
-        runs = info["runs"]
-
-        print(f"\n=== Type {type_id} – {type_name} ===")
-
-        scores_for_type = []
-
-        # Pour chaque run de ce type et pour chaque sujet, on évalue le pipeline.
-        for run_id in runs:
-            run_scores = []
-            for subject_id in range(1, 110):
-                acc = eval_subject_run(subject_id, run_id, full_pipeline)
-                if acc is not None:
-                    run_scores.append(acc)
-                    print(f"type {type_id}, run {run_id}, subject {subject_id:03}: accuracy = {acc:.4f}")
-
-            if run_scores:
-                mean_run_acc = float(np.mean(run_scores))
-                scores_for_type.extend(run_scores)
-                print(f"Mean accuracy for run {run_id}: {mean_run_acc:.4f}")
-
-        if scores_for_type:
-            mean_type_acc = float(np.mean(scores_for_type))
-            type_accuracies[type_id] = mean_type_acc
-            print(f"\n📊 Mean accuracy for type {type_id} ({type_name}): {mean_type_acc:.4f}\n")
-        else:
-            print(f"Aucun score calculé pour le type {type_id} (peut-être trop de runs mono-classe).")
-
-    if not type_accuracies:
-        print("Aucun score global calculé (tous les types vides ?).")
+    X, y = p.get_all_data(subject, run)
+    if len(X) == 0:
+        print("Aucune donnée trouvée pour ce sujet/run.")
         return
 
-    print("📊 Mean accuracy over all types:")
-    for type_id, acc in type_accuracies.items():
-        print(f"Type {type_id} ({EXPERIMENT_TYPES[type_id]['name']}): accuracy = {acc:.4f}")
+    # Convertir y en numérique : T1 -> 0, T2 -> 1
+    y_numeric = np.array([0 if label == 'T1' else 1 for label in y])
 
-    final_mean = float(np.mean(list(type_accuracies.values())))
-    print(f"\n🔚 Final mean accuracy over all types: {final_mean:.4f}")
+    # Aplatir epochs pour PCA (n_epochs, n_channels * n_times)
+    X_flat = X.reshape((X.shape[0], -1))
 
+    # Pipeline avec tes classes personnalisées : CSP + PCA + LogisticRegression
+    # CSP attend X en (n_epochs, n_channels, n_times), pas aplati
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'OLD', 'myImplementation'))
+    from MyCSP import MyCSP
+    from MyPCA import MyPCA
+    from MyLogisticRegression import MyLogisticRegression
 
-def main_with_args(argv: list[str]):
-    """Mode avec arguments : entraînement ou (futur) mode prédiction.
+    # Aplatir après CSP pour PCA
+    X_csp = X  # Garder la forme 3D pour CSP
+    n_components_pca = min(10, X.shape[0], X.shape[1] * X.shape[2])  # Après aplatissement
+    pipe = Pipeline([
+        ("csp", MyCSP(n_components=4)),  # CSP pour extraire 4 composantes spatiales
+        ("pca", MyPCA(n_components=n_components_pca)),  # PCA personnalisée sur les features CSP
+        ("clf", MyLogisticRegression(max_iter=1000, lambda_=0.01))  # LogisticRegression personnalisée
+    ])
 
-    Usage : python mybci.py <subject_num> <run_num> <train>
-    """
-
-    if len(argv) != 4:
-        print("Usage: python mybci.py <subject_num> <run_num> <train>")
-        sys.exit(1)
-
-    subject = int(argv[1])
-    run = int(argv[2])
-    mode = argv[3]
-
-    if not (1 <= subject <= 109):
-        print("❌ Subject must be between 1 and 109 (S001 to S109)")
-        sys.exit(1)
-
-    if run not in useful_runs:
-        print(f"❌ Run must be one of: {list(useful_runs.keys())}")
-        sys.exit(1)
-
-    if mode == "train":
-        # On appelle simplement la fonction train du nouveau fichier `train.py`.
-        train(subject, run)
+    # Cross-validation (ajuster cv si peu de données)
+    cv_folds = min(5, len(y_numeric))
+    if cv_folds >= 2:
+        try:
+            scores = cross_val_score(pipe, X_csp, y_numeric, cv=cv_folds)
+            print(f"cross_val_score: {scores.mean():.4f}")
+        except ValueError:
+            # Si CV impossible (pas assez d'échantillons par classe), skip
+            print("Pas assez d'échantillons par classe pour cross-validation, skip.")
     else:
-        print("❌ Mode must be 'train'")
-        sys.exit(1)
+        print("Pas assez de données pour cross-validation, skip.")
 
+    # Entraînement final
+    pipe.fit(X_csp, y_numeric)
+
+    # Sauvegarde avec métadonnées
+    os.makedirs("models", exist_ok=True)
+    model_path = f"models/subject_{subject:03d}_exp{experiment}.pkl"
+    cv_score = scores.mean() if 'scores' in locals() and len(scores) > 0 else None
+    model_data = {
+        'pipeline': pipe,
+        'cv_score': cv_score,
+        'subject': subject,
+        'experiment': experiment
+    }
+    joblib.dump(model_data, model_path)
+    print(f"Modèle sauvegardé : {model_path}")
+
+def predict(subject, run, experiment_id, return_acc=False):
+    """
+    Charge le modèle, prédit sur chaque epoch, affiche la vérité et la prédiction.
+    Si return_acc=True, retourne l'accuracy (float), sinon None.
+    """
+    from processing import Processing
+    import joblib
+    import numpy as np
+    import os
+
+    exp = EXPERIMENTS[experiment_id]
+    run = exp["run"]
+    print(f"[PREDICT] Sujet {subject:03d} | Expérience {experiment_id} | Run {run}")
+
+    model_path = f"models/subject_{subject:03d}_exp{experiment_id}.pkl"
+    if not os.path.exists(model_path):
+        print(f"Modèle non trouvé : {model_path}")
+        return None if return_acc else None
+    model_data = joblib.load(model_path)
+    pipe = model_data['pipeline']
+
+    p = Processing()
+    X, y = p.get_all_data(subject, run)
+    if len(X) == 0:
+        print("Aucune donnée trouvée pour ce sujet/run.")
+        return None if return_acc else None
+
+    # Convertir y en numérique pour la prédiction
+    y_numeric = np.array([0 if label == 'T1' else 1 for label in y])
+
+    # Baseline : accuracy de la classe majoritaire
+    baseline = max(np.sum(y == 'T1'), np.sum(y == 'T2')) / len(y)
+    print(f"Baseline accuracy (majority class): {baseline:.4f}")
+
+    # Utiliser X en 3D pour le pipeline CSP
+    X_input = X  # (n_epochs, n_channels, n_times)
+    y_pred_numeric = pipe.predict(X_input)
+
+    # Convertir y_pred_numeric en labels pour affichage
+    y_pred = ['T1' if pred == 0 else 'T2' for pred in y_pred_numeric]
+
+    print("epoch nb: [prediction] [truth] equal?")
+    correct = 0
+    for i in range(len(y)):
+        equal = y_pred[i] == y[i]
+        print(f"epoch {i:02d}: [{y_pred[i]}] [{y[i]}] {str(equal)}")
+        if equal:
+            correct += 1
+    acc = correct / len(y)
+    print(f"Accuracy: {acc:.4f}")
+    # Sauvegarde du score de test
+    model_data['test_score'] = acc
+    joblib.dump(model_data, model_path)
+    if return_acc:
+        return acc
+    return None
+
+def main():
+    args = sys.argv[1:]
+    if len(args) == 0:
+        # Mode global : cross-val sur tous les sujets et expériences
+        all_accs = []
+        for exp in EXPERIMENTS:
+            accs = []
+            for subject in range(1, 110):
+                train(subject, exp["id"])
+                acc = predict(subject, exp["run"], exp["id"], return_acc=True)
+                if acc is not None:
+                    accs.append(acc)
+                    all_accs.append(acc)
+            print(f"experiment {exp['id']}: accuracy = {np.mean(accs) if accs else 0:.4f}")
+        print(f"Global mean accuracy: {np.mean(all_accs) if all_accs else 0:.4f}")
+    elif len(args) == 2:
+        subject = int(args[0])
+        experiment_id = int(args[1])
+        exp = EXPERIMENTS[experiment_id]
+        run = exp["run"]
+        train(subject, experiment_id)
+        predict(subject, run, experiment_id)
+    else:
+        print("Usage: python mybci.py [subject run]")
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1:
-        main_no_args()
-    else:
-        main_with_args(sys.argv)
+    main()
 
