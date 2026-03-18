@@ -14,7 +14,7 @@ np.random.seed(42)
 
 # Supprimer les avertissements MNE bénins
 warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*annotation.*")
-from processing import get_all_data, get_data, extract_epochs, balance_classes, average_over_epochs, split_train_test
+from processing import get_all_data, get_data, extract_epochs, balance_classes, average_over_epochs, split_train_test, clean_epochs_autoreject, setup_data_for_subject
 from utils import experiments
 from MyCSP import MyCSP
 from sklearn.pipeline import Pipeline
@@ -37,11 +37,14 @@ def main():
 		epilog=(
 			"Exemples :\n"
 			"  python mybci.py\n"
+			"  python mybci.py --per-subject [1-6]\n"
 			"  python mybci.py <subject_id 1 - 109> <run_id 3 - 14> train\n"
 			"  python mybci.py <subject_id 1 - 109> <run_id 3 - 14> predict\n"
 		),
 	)
-
+	
+	parser.add_argument("--per-subject", type=int, default=None, choices=[1,2,3,4,5,6],
+						help="Entraîner UN modèle par sujet pour une expérience donnée (1-6)")
 	parser.add_argument("subject_id", type=int, nargs="?", default=None,
 						help="Numéro du sujet (1–109)")
 	parser.add_argument("run_id", type=int, nargs="?", default=None,
@@ -52,10 +55,11 @@ def main():
 
 	args = parser.parse_args()
 
-	if args.command is None:
+	if args.per_subject:
+		run_per_subject(args.per_subject)
+	elif args.command is None:
 		runAlltests()
-
-	if args.command == "train":
+	elif args.command == "train":
 		train(subject_id=args.subject_id, run_id=args.run_id)
 	elif args.command == "predict":
 		predict(subject_id=args.subject_id, run_id=args.run_id)
@@ -93,6 +97,93 @@ def print_results(exps):
 	print(f"CV:         {np.mean(cv_mean_scores):.3f} +/- {np.std(cv_mean_scores):.3f}")
 
 
+def run_per_subject(experiment_id=1):
+	"""Entraîne UN modèle PAR SUJET pour une expérience donnée"""
+	print(f"\n=== Entraînement par sujet: {experiments[experiment_id-1]['name']} ===\n")
+	experiment = experiments[experiment_id-1]
+	results = []
+	
+	for subject_id in tqdm(range(1, 110), desc=f"Sujets"):
+		try:
+			# Charger données
+			raw = setup_data_for_subject(experiment, subject_id)
+			if raw is None:
+				if subject_id <= 2:
+					print(f"[*] S{subject_id}: raw is None")
+				continue
+			
+			# Filtrer
+			raw = raw.notch_filter(60, method="iir")
+			raw = raw.filter(1., 15., fir_design='firwin', skip_by_annotation="edge")
+			
+			# Extraire epochs
+			epochs = extract_epochs(raw)
+			if epochs is None:
+				if subject_id <= 2:
+					print(f"[*] S{subject_id}: epochs is None")
+				continue
+			
+			# Nettoyer + balancer + moyenner
+			epochs = clean_epochs_autoreject(epochs)
+			epochs = balance_classes(epochs)
+			# For per-subject: use smaller window size with overlap to get enough super-epochs
+			X_avg, y_avg = average_over_epochs(epochs, window_size=5, overlap=0.5)
+			
+			if len(X_avg) < 10:
+				if subject_id <= 2:
+					print(f"[*] S{subject_id}: len(X_avg)={len(X_avg)} < 10")
+				continue
+			
+			# Train/Test split
+			X_train, X_test, y_train, y_test = split_train_test(X_avg, y_avg)
+			
+			# Entraîner
+			csp = MyCSP(n_components=4)
+			lda = LinearDiscriminantAnalysis(solver="eigen", shrinkage='auto')
+			pipeline = Pipeline([("CSP", csp), ("LDA", lda)])
+			pipeline.fit(X_train, y_train)
+			
+			# Scorer
+			train_score = pipeline.score(X_train, y_train)
+			test_score = pipeline.score(X_test, y_test)
+			
+			# Cross-validation
+			cv = ShuffleSplit(n_splits=10, test_size=0.2, random_state=42)
+			cv_scores = cross_val_score(pipeline, X_train, y_train, cv=cv, scoring='accuracy')
+			
+			results.append({
+				'subject': subject_id,
+				'train': train_score,
+				'test': test_score,
+				'cv': np.mean(cv_scores)
+			})
+		except Exception as e:
+			print(f"\n[ERR] Subject {subject_id} exception: {type(e).__name__}: {str(e)[:80]}")
+	
+	# Afficher résultats
+	if results:
+		train_scores = [r['train'] for r in results]
+		test_scores = [r['test'] for r in results]
+		cv_scores = [r['cv'] for r in results]
+		
+		print(f"\n[OK] {len(results)} sujets traites")
+		print("\n=== Moyennes par sujet ===")
+		print(f"Train:  {np.mean(train_scores):.3f} +/- {np.std(train_scores):.3f}")
+		print(f"Test:   {np.mean(test_scores):.3f} +/- {np.std(test_scores):.3f}")
+		print(f"CV:     {np.mean(cv_scores):.3f} +/- {np.std(cv_scores):.3f}")
+		
+		# Top 10
+		results_sorted = sorted(results, key=lambda x: x['test'], reverse=True)
+		print(f"\n[TOP5] Top 5 sujets (par test accuracy):")
+		for i, r in enumerate(results_sorted[:5]):
+			print(f"  {i+1}. Sujet {r['subject']}: test={r['test']:.3f}, train={r['train']:.3f}, cv={r['cv']:.3f}")
+	else:
+		print("[ERR] Aucun sujet traité avec succès")
+	
+	# Retourner les résultats pour utilisation dans visualize_results.py
+	return results
+
+
 def runAlltests():
 	print("\n=== Démarrage du traitement ===\n")
 	start_total = time.time()
@@ -121,6 +212,11 @@ def runAlltests():
 			print(f"  ✗ Pas d'epochs")
 			continue
 		print(f"  ✓ Epochs extraits ({time.time()-t0:.1f}s)")
+		
+		# Nettoyer les bad epochs avec AutoReject
+		t0 = time.time()
+		epochs = clean_epochs_autoreject(epochs)
+		print(f"  ✓ Bad epochs nettoyés ({time.time()-t0:.1f}s) - {len(epochs)} epochs")
 		
 		# Balancer et moyenner
 		t0 = time.time()

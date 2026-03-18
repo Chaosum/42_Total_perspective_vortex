@@ -3,6 +3,7 @@ import mne
 import numpy as np
 from mne.datasets import eegbci
 from pathlib import Path
+from autoreject import AutoReject
 from utils import experiments, channels
 
 BASE_PATH = Path(__file__).parent.parent / "src" / "data" / "MNE-eegbci-data" / "files" / "eegmmidb" / "1.0.0"
@@ -72,6 +73,27 @@ def extract_epochs(raw):
 		
 	return epochs
 
+def clean_epochs_autoreject(epochs):
+	"""Nettoyage léger: rejette les epochs avec amplitude anormale"""
+	try:
+		X = epochs.get_data()
+		# Calculer l'amplitude max par epoch
+		amplitudes = np.max(np.abs(X), axis=(1, 2))
+		
+		# Seuil: mean + 3*std
+		threshold = np.mean(amplitudes) + 3 * np.std(amplitudes)
+		
+		# Masque des epochs à garder
+		mask = amplitudes < threshold
+		
+		if np.sum(~mask) > 0:
+			print(f"    -> {np.sum(~mask)} bad epochs rejected (amplitude > {threshold:.0f} uV)")
+		
+		return epochs[mask]
+	except Exception as e:
+		print(f"  [!] Cleaning failed: {e}, continuing without cleaning")
+		return epochs
+
 def balance_classes(epochs):
 	"""Balance les classes"""
 	min_count = np.inf
@@ -85,8 +107,14 @@ def balance_classes(epochs):
 		indices.extend(np.random.choice(label_indices, min_count, replace=False))
 	return epochs[sorted(indices)]
 
-def average_over_epochs(epochs, window_size=20):
-	"""Crée des super-epochs en moyennant N epochs consécutifs"""
+def average_over_epochs(epochs, window_size=20, overlap=0.75):
+	"""Crée des super-epochs en moyennant N epochs consécutifs avec chevauchement
+	
+	Args:
+		window_size: nombre d'epochs à moyenner pour chaque super-epoch
+		overlap: fraction de chevauchement entre fenêtres (0=none, 1=full)
+			stride = window_size * (1 - overlap)
+	"""
 	labels = epochs.events[:, -1]
 	X = epochs.get_data()
 	X_avg = []
@@ -94,13 +122,16 @@ def average_over_epochs(epochs, window_size=20):
 	
 	event_id_inv = {v: k for k, v in epochs.event_id.items()}
 	
+	# Calculer le stride basé sur le chevauchement
+	stride = max(1, int(window_size * (1 - overlap)))
+	
 	# Pour chaque classe, créer des super-epochs en moyennant window_size epochs
 	for label in np.unique(labels):
 		mask = np.where(labels == label)[0]
 		class_data = X[mask]
 		
-		# Créer des super-epochs en moyennant window_size epochs à la fois
-		for i in range(0, len(class_data) - window_size + 1, window_size):
+		# Créer des super-epochs avec fenêtres chevauchantes
+		for i in range(0, len(class_data) - window_size + 1, stride):
 			super_epoch = np.mean(class_data[i:i+window_size], axis=0)
 			X_avg.append(super_epoch)
 			y_avg.append(event_id_inv[label])
@@ -195,6 +226,40 @@ def setup_all_data(experiment, max_subjects=None):
 				raws.append(raw_data)
 			except Exception as e:
 				print(f"Erreur pour {subj_str} run {run} : {e}")
+	
+	if len(raws) == 0:
+		return None
+	
+	for raw_obj in raws:
+		raw_obj.pick(picks=channels)
+	
+	raw = raws[0]
+	for r in raws[1:]:
+		raw.append(r)
+	return raw
+
+def setup_data_for_subject(experiment, subject_id):
+	"""Charge tous les runs d'UN sujet pour une expérience donnée"""
+	raws = []
+	subj_str = f"S{subject_id:03}"
+	for run in experiment["runs"]:
+		try:
+			raw_data = load_subject_run(subj_str, run)
+			if raw_data.info['sfreq'] != 160.0:
+				raw_data.resample(sfreq=160.0)
+			mne.datasets.eegbci.standardize(raw_data)
+			raw_data.set_montage("standard_1005")
+			events, _ = mne.events_from_annotations(raw_data)
+			mapping = experiment["mapping"]
+			annotations = mne.annotations_from_events(
+				events=events,
+				event_desc=mapping,
+				sfreq=raw_data.info["sfreq"]
+			)
+			raw_data.set_annotations(annotations)
+			raws.append(raw_data)
+		except Exception as e:
+			return None
 	
 	if len(raws) == 0:
 		return None
