@@ -1,183 +1,240 @@
-
-import sys
+import argparse
 import os
-import numpy as np
+import sys
 import joblib
-# from processing import Processing
-# from utils import cross_val_score_pipeline
+import numpy as np
+import time
+import warnings
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.model_selection import cross_val_score, ShuffleSplit
+from tqdm import tqdm
 
-# Définition des expériences (run, classes)
-EXPERIMENTS = [
-    {"id": 0, "run": 3, "classes": ("left_fist", "right_fist")},
-    {"id": 1, "run": 4, "classes": ("left_fist", "right_fist")},
-    {"id": 2, "run": 5, "classes": ("both_fists", "both_feet")},
-    {"id": 3, "run": 6, "classes": ("both_fists", "both_feet")},
-    {"id": 4, "run": 7, "classes": ("left_fist", "right_fist")},
-    {"id": 5, "run": 8, "classes": ("left_foot", "right_foot")},
-]
+# Fixer le random seed pour reproductibilité
+np.random.seed(42)
 
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
-os.makedirs(MODEL_DIR, exist_ok=True)
+# Supprimer les avertissements MNE bénins
+warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*annotation.*")
+from processing import get_all_data, get_data, extract_epochs, balance_classes, average_over_epochs, split_train_test
+from utils import experiments
+from MyCSP import MyCSP
+from sklearn.pipeline import Pipeline
 
+# Accès aux modules du dossier src/ quel que soit le répertoire de lancement
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-def train(subject, experiment):
-    """
-    Entraîne un pipeline sklearn pour un sujet et une expérience (catégorie).
-    """
-    from processing import Processing
-    from sklearn.decomposition import PCA
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.pipeline import Pipeline
-    from sklearn.model_selection import cross_val_score
-    import joblib
-    import os
-
-    # Associer expérience à run et classes
-    exp = EXPERIMENTS[experiment]
-    run = exp["run"]
-    print(f"[TRAIN] Sujet {subject:03d} | Expérience {experiment} | Run {run}")
-
-    # Charger les données
-    p = Processing()
-    X, y = p.get_all_data(subject, run)
-    if len(X) == 0:
-        print("Aucune donnée trouvée pour ce sujet/run.")
-        return
-
-    # Convertir y en numérique : T1 -> 0, T2 -> 1
-    y_numeric = np.array([0 if label == 'T1' else 1 for label in y])
-
-    # Aplatir epochs pour PCA (n_epochs, n_channels * n_times)
-    X_flat = X.reshape((X.shape[0], -1))
-
-    # Pipeline avec tes classes personnalisées : CSP + PCA + LogisticRegression
-    # CSP attend X en (n_epochs, n_channels, n_times), pas aplati
-    import sys
-    import os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'OLD', 'myImplementation'))
-    from MyCSP import MyCSP
-    from MyPCA import MyPCA
-    from MyLogisticRegression import MyLogisticRegression
-
-    # Aplatir après CSP pour PCA
-    X_csp = X  # Garder la forme 3D pour CSP
-    n_components_pca = min(10, X.shape[0], X.shape[1] * X.shape[2])  # Après aplatissement
-    pipe = Pipeline([
-        ("csp", MyCSP(n_components=4)),  # CSP pour extraire 4 composantes spatiales
-        ("pca", MyPCA(n_components=n_components_pca)),  # PCA personnalisée sur les features CSP
-        ("clf", MyLogisticRegression(max_iter=1000, lambda_=0.01))  # LogisticRegression personnalisée
-    ])
-
-    # Cross-validation (ajuster cv si peu de données)
-    cv_folds = min(5, len(y_numeric))
-    if cv_folds >= 2:
-        try:
-            scores = cross_val_score(pipe, X_csp, y_numeric, cv=cv_folds)
-            print(f"cross_val_score: {scores.mean():.4f}")
-        except ValueError:
-            # Si CV impossible (pas assez d'échantillons par classe), skip
-            print("Pas assez d'échantillons par classe pour cross-validation, skip.")
-    else:
-        print("Pas assez de données pour cross-validation, skip.")
-
-    # Entraînement final
-    pipe.fit(X_csp, y_numeric)
-
-    # Sauvegarde avec métadonnées
-    os.makedirs("models", exist_ok=True)
-    model_path = f"models/subject_{subject:03d}_exp{experiment}.pkl"
-    cv_score = scores.mean() if 'scores' in locals() and len(scores) > 0 else None
-    model_data = {
-        'pipeline': pipe,
-        'cv_score': cv_score,
-        'subject': subject,
-        'experiment': experiment
-    }
-    joblib.dump(model_data, model_path)
-    print(f"Modèle sauvegardé : {model_path}")
-
-def predict(subject, run, experiment_id, return_acc=False):
-    """
-    Charge le modèle, prédit sur chaque epoch, affiche la vérité et la prédiction.
-    Si return_acc=True, retourne l'accuracy (float), sinon None.
-    """
-    from processing import Processing
-    import joblib
-    import numpy as np
-    import os
-
-    exp = EXPERIMENTS[experiment_id]
-    run = exp["run"]
-    print(f"[PREDICT] Sujet {subject:03d} | Expérience {experiment_id} | Run {run}")
-
-    model_path = f"models/subject_{subject:03d}_exp{experiment_id}.pkl"
-    if not os.path.exists(model_path):
-        print(f"Modèle non trouvé : {model_path}")
-        return None if return_acc else None
-    model_data = joblib.load(model_path)
-    pipe = model_data['pipeline']
-
-    p = Processing()
-    X, y = p.get_all_data(subject, run)
-    if len(X) == 0:
-        print("Aucune donnée trouvée pour ce sujet/run.")
-        return None if return_acc else None
-
-    # Convertir y en numérique pour la prédiction
-    y_numeric = np.array([0 if label == 'T1' else 1 for label in y])
-
-    # Baseline : accuracy de la classe majoritaire
-    baseline = max(np.sum(y == 'T1'), np.sum(y == 'T2')) / len(y)
-    print(f"Baseline accuracy (majority class): {baseline:.4f}")
-
-    # Utiliser X en 3D pour le pipeline CSP
-    X_input = X  # (n_epochs, n_channels, n_times)
-    y_pred_numeric = pipe.predict(X_input)
-
-    # Convertir y_pred_numeric en labels pour affichage
-    y_pred = ['T1' if pred == 0 else 'T2' for pred in y_pred_numeric]
-
-    print("epoch nb: [prediction] [truth] equal?")
-    correct = 0
-    for i in range(len(y)):
-        equal = y_pred[i] == y[i]
-        print(f"epoch {i:02d}: [{y_pred[i]}] [{y[i]}] {str(equal)}")
-        if equal:
-            correct += 1
-    acc = correct / len(y)
-    print(f"Accuracy: {acc:.4f}")
-    # Sauvegarde du score de test
-    model_data['test_score'] = acc
-    joblib.dump(model_data, model_path)
-    if return_acc:
-        return acc
-    return None
+# Chemin racine des modèles (relatif au répertoire de lancement)
+def _model_path(subject_id: int, task: str, test_run: int) -> str:
+	base = os.path.join(
+		os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+		"models", "leave_one_run_out", task
+	)
+	return os.path.join(base, f"subject_{subject_id:03d}_testrun_{test_run}.pkl")
 
 def main():
-    args = sys.argv[1:]
-    if len(args) == 0:
-        # Mode global : cross-val sur tous les sujets et expériences
-        all_accs = []
-        for exp in EXPERIMENTS:
-            accs = []
-            for subject in range(1, 110):
-                train(subject, exp["id"])
-                acc = predict(subject, exp["run"], exp["id"], return_acc=True)
-                if acc is not None:
-                    accs.append(acc)
-                    all_accs.append(acc)
-            print(f"experiment {exp['id']}: accuracy = {np.mean(accs) if accs else 0:.4f}")
-        print(f"Global mean accuracy: {np.mean(all_accs) if all_accs else 0:.4f}")
-    elif len(args) == 2:
-        subject = int(args[0])
-        experiment_id = int(args[1])
-        exp = EXPERIMENTS[experiment_id]
-        run = exp["run"]
-        train(subject, experiment_id)
-        predict(subject, run, experiment_id)
-    else:
-        print("Usage: python mybci.py [subject run]")
+	parser = argparse.ArgumentParser(
+		description="",
+		formatter_class=argparse.RawDescriptionHelpFormatter,
+		epilog=(
+			"Exemples :\n"
+			"  python mybci.py\n"
+			"  python mybci.py <subject_id 1 - 109> <run_id 3 - 14> train\n"
+			"  python mybci.py <subject_id 1 - 109> <run_id 3 - 14> predict\n"
+		),
+	)
+
+	parser.add_argument("subject_id", type=int, nargs="?", default=None,
+						help="Numéro du sujet (1–109)")
+	parser.add_argument("run_id", type=int, nargs="?", default=None,
+						help="Numéro du run (3–14)")
+	parser.add_argument("command", nargs="?", default=None,
+						choices=["train", "predict"],
+						help="Commande à exécuter")
+
+	args = parser.parse_args()
+
+	if args.command is None:
+		runAlltests()
+
+	if args.command == "train":
+		train(subject_id=args.subject_id, run_id=args.run_id)
+	elif args.command == "predict":
+		predict(subject_id=args.subject_id, run_id=args.run_id)
+
+
+def print_results(exps):
+	"""Affiche les scores train/test/crossval pour chaque expérience"""
+	train_scores = []
+	test_scores = []
+	cv_mean_scores = []
+	
+	for experiment in exps:
+		if "pipeline" in experiment and "X_train" in experiment:
+			train_score = experiment["pipeline"].score(experiment["X_train"], experiment["y_train"])
+			test_score = experiment["pipeline"].score(experiment["X_test"], experiment["y_test"])
+			cv_mean = np.mean(experiment["cv_scores"])
+			
+			train_scores.append(train_score)
+			test_scores.append(test_score)
+			cv_mean_scores.append(cv_mean)
+			
+			print(f"\n{experiment['name']}")
+			print(f"  Train:    {train_score:.3f}")
+			print(f"  Test:     {test_score:.3f}")
+			print(f"  CV:       {cv_mean:.3f} (+/- {np.std(experiment['cv_scores']):.3f})")
+	
+	if len(train_scores) == 0:
+		print("\n❌ Aucun résultat à afficher - vérifier les logs d'erreur")
+		return
+		
+	print("\n" + "="*50)
+	print("=== Moyennes globales ===")
+	print(f"Train:      {np.mean(train_scores):.3f} +/- {np.std(train_scores):.3f}")
+	print(f"Test:       {np.mean(test_scores):.3f} +/- {np.std(test_scores):.3f}")
+	print(f"CV:         {np.mean(cv_mean_scores):.3f} +/- {np.std(cv_mean_scores):.3f}")
+
+
+def runAlltests():
+	print("\n=== Démarrage du traitement ===\n")
+	start_total = time.time()
+	
+	for i, experiment in enumerate(tqdm(experiments, desc="Experiments")):
+		print(f"\n[{i+1}/{len(experiments)}] Traitement de {experiment['name']}...")
+		
+		# Charger données
+		t0 = time.time()
+		raw = get_all_data(experiment)
+		if raw is None:
+			print(f"  ✗ Pas de données")
+			continue
+		print(f"  ✓ Données chargées ({time.time()-t0:.1f}s)")
+		
+		# Filtrer
+		t0 = time.time()
+		raw = raw.notch_filter(60, method="iir")
+		raw = raw.filter(1., 15., fir_design='firwin', skip_by_annotation="edge")
+		print(f"  ✓ Filtrage appliqué ({time.time()-t0:.1f}s)")
+		
+		# Extraire epochs
+		t0 = time.time()
+		epochs = extract_epochs(raw)
+		if epochs is None:
+			print(f"  ✗ Pas d'epochs")
+			continue
+		print(f"  ✓ Epochs extraits ({time.time()-t0:.1f}s)")
+		
+		# Balancer et moyenner
+		t0 = time.time()
+		epochs = balance_classes(epochs)
+		X_avg, y_avg = average_over_epochs(epochs)
+		print(f"  ✓ Classes balancées et moyennées ({time.time()-t0:.1f}s) - {len(X_avg)} échantillons")
+		
+		experiment["epochs"] = epochs
+		experiment["X_avg"] = X_avg
+		experiment["y_avg"] = y_avg
+
+		# Train/Test split
+		X_train, X_test, y_train, y_test = split_train_test(X_avg, y_avg)
+		experiment["X_train"] = X_train
+		experiment["X_test"] = X_test
+		experiment["y_train"] = y_train
+		experiment["y_test"] = y_test
+
+		# Entraîner
+		t0 = time.time()
+		csp = MyCSP(n_components=4)
+		lda = LinearDiscriminantAnalysis(solver="eigen", shrinkage='auto')
+		pipeline = Pipeline([
+			("CSP", csp),
+			("LDA", lda)
+		])
+		pipeline.fit(X_train, y_train)
+		experiment["pipeline"] = pipeline
+		joblib.dump(
+			pipeline,
+			f'{experiment["name"]}.joblib'
+		)
+		print(f"  ✓ Pipeline entraîné et sauvegardé ({time.time()-t0:.1f}s)")
+		
+		# Cross-validation avec ShuffleSplit (comme le repo original)
+		t0 = time.time()
+		cv = ShuffleSplit(n_splits=10, test_size=0.2, random_state=42)
+		cv_scores = cross_val_score(pipeline, X_train, y_train, cv=cv, scoring='accuracy')
+		experiment["cv_scores"] = cv_scores
+		print(f"  ✓ Cross-validation complétée ({time.time()-t0:.1f}s)")
+	
+	elapsed = time.time() - start_total
+	print(f"\n✓ Traitement terminé en {elapsed/60:.1f} minutes")
+	print_results(experiments)
+
+
+def train(subject_id: int, run_id: int):
+	"""Entraîne un modèle LORO pour un sujet donné"""
+	print(f"\n=== Entraînement sujet {subject_id}, run {run_id} ===\n")
+	
+	# Utiliser la première expérience (assumption: une seule task par défaut)
+	experiment = experiments[0]
+	
+	# Charger et traiter les données pour ce sujet/run
+	raw = get_data(subject_id, run_id)
+	if raw is None or len(raw[0]) == 0:
+		print(f"Pas de données pour sujet {subject_id}, run {run_id}")
+		return
+	
+	X, y = raw
+	X_train, X_test, y_train, y_test = split_train_test(X, y)
+	
+	# Créer et entraîner le pipeline
+	csp = MyCSP(n_components=4)
+	lda = LinearDiscriminantAnalysis(solver="eigen", shrinkage='auto')
+	pipeline = Pipeline([
+		("CSP", csp),
+		("LDA", lda)
+	])
+	pipeline.fit(X_train, y_train)
+	
+	# Évaluer
+	train_score = pipeline.score(X_train, y_train)
+	test_score = pipeline.score(X_test, y_test)
+	
+	print(f"Train: {train_score:.2f}")
+	print(f"Test:  {test_score:.2f}")
+	
+	# Sauvegarder
+	model_path = _model_path(subject_id, experiment["task"] if "task" in experiment else "default", run_id)
+	os.makedirs(os.path.dirname(model_path), exist_ok=True)
+	joblib.dump(pipeline, model_path)
+	print(f"Modèle sauvegardé: {model_path}")
+
+
+def predict(subject_id: int, run_id: int):
+	"""Prédit avec un modèle entraîné pour un sujet donné"""
+	print(f"\n=== Prédiction sujet {subject_id}, run {run_id} ===\n")
+	
+	experiment = experiments[0]
+	model_path = _model_path(subject_id, experiment["task"] if "task" in experiment else "default", run_id)
+	
+	# Charger le modèle
+	try:
+		pipeline = joblib.load(model_path)
+	except FileNotFoundError:
+		print(f"Modèle non trouvé: {model_path}")
+		return
+	
+	# Charger et traiter les données
+	raw = get_data(subject_id, run_id)
+	if raw is None or len(raw[0]) == 0:
+		print(f"Pas de données pour sujet {subject_id}, run {run_id}")
+		return
+	
+	X, y = raw
+	predictions = pipeline.predict(X)
+	accuracy = np.mean(predictions == y)
+	
+	print(f"Accuracy: {accuracy:.2f}")
+	print(f"Prédictions: {predictions[:10]}... (premières 10)")
+	print(f"Vraies valeurs: {y[:10]}... (premières 10)")
+
 
 if __name__ == "__main__":
-    main()
+	main()
 
