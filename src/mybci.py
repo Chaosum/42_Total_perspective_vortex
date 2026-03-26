@@ -14,7 +14,7 @@ np.random.seed(42)
 
 # Supprimer les avertissements MNE bénins
 warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*annotation.*")
-from processing import get_all_data, get_data, extract_epochs, balance_classes, average_over_epochs, split_train_test, clean_epochs_autoreject, setup_data_for_subject
+from processing import setup_data_for_subject, get_data, extract_epochs, balance_classes, average_over_epochs, split_train_test, clean_epochs_autoreject
 from utils import experiments
 from MyCSP import MyCSP
 from sklearn.pipeline import Pipeline
@@ -114,7 +114,7 @@ def run_per_subject(experiment_id=1):
 			
 			# Filtrer
 			raw = raw.notch_filter(60, method="iir")
-			raw = raw.filter(1., 15., fir_design='firwin', skip_by_annotation="edge")
+			raw = raw.filter(8., 40., fir_design='firwin', skip_by_annotation="edge")
 			
 			# Extraire epochs
 			epochs = extract_epochs(raw)
@@ -188,79 +188,83 @@ def runAlltests():
 	print("\n=== Démarrage du traitement ===\n")
 	start_total = time.time()
 	
-	for i, experiment in enumerate(tqdm(experiments, desc="Experiments")):
-		print(f"\n[{i+1}/{len(experiments)}] Traitement de {experiment['name']}...")
+	# Accumulator pour les scores moyens par expérience
+	mean_scores = {i: [] for i in range(len(experiments))}
+	
+	# Boucler sur chaque expérience
+	for exp_idx, experiment in enumerate(experiments):
+		print(f"[DEBUG] Exp {exp_idx}: {experiment['name']}")
+		# Boucler sur chaque sujet (1-109)
+		count_subjects = 0
+		for subject_id in range(1, 110):
+			try:
+				# Charger les données du sujet pour cette expérience
+				raw = setup_data_for_subject(experiment, subject_id)
+				if raw is None:
+					continue
+				
+				# Filtrer
+				raw = raw.notch_filter(60, method="iir")
+				raw = raw.filter(1., 15., fir_design='firwin', skip_by_annotation="edge")
+				
+				# Extraire epochs
+				epochs = extract_epochs(raw)
+				if epochs is None:
+					continue
+				
+				# Nettoyer
+				epochs = clean_epochs_autoreject(epochs)
+				
+				# Balancer et moyenner
+				epochs = balance_classes(epochs)
+				X_avg, y_avg = average_over_epochs(epochs)
+				
+				if len(X_avg) == 0:
+					continue
+				
+				# Train/Test split
+				X_train, X_test, y_train, y_test = split_train_test(X_avg, y_avg)
+				
+				# Entraîner
+				csp = MyCSP(n_components=4)
+				lda = LinearDiscriminantAnalysis(solver="eigen", shrinkage='auto')
+				pipeline = Pipeline([
+					("CSP", csp),
+					("LDA", lda)
+				])
+				pipeline.fit(X_train, y_train)
+				
+				# Évaluer sur test set
+				test_score = pipeline.score(X_test, y_test)
+				
+				# Cross-validation sur le train set
+				cv = ShuffleSplit(n_splits=5, test_size=0.2, random_state=42)
+				cv_scores = cross_val_score(pipeline, X_train, y_train, cv=cv, scoring='accuracy')
+				cv_mean = np.nanmean(cv_scores)
+				
+				mean_scores[exp_idx].append(test_score)
+				count_subjects += 1
+				
+				# Afficher le résultat
+				print(f"experiment {exp_idx}: subject {subject_id:03d}: accuracy = {test_score:.4f}")
+			
+			except Exception as e:
+				# Afficher l'erreur pour debug
+				print(f"[ERROR] S{subject_id:03} exp{exp_idx}: {type(e).__name__}: {str(e)[:80]}")
 		
-		# Charger données
-		t0 = time.time()
-		raw = get_all_data(experiment)
-		if raw is None:
-			print(f"  ✗ Pas de données")
-			continue
-		print(f"  ✓ Données chargées ({time.time()-t0:.1f}s)")
-		
-		# Filtrer
-		t0 = time.time()
-		raw = raw.notch_filter(60, method="iir")
-		raw = raw.filter(1., 15., fir_design='firwin', skip_by_annotation="edge")
-		print(f"  ✓ Filtrage appliqué ({time.time()-t0:.1f}s)")
-		
-		# Extraire epochs
-		t0 = time.time()
-		epochs = extract_epochs(raw)
-		if epochs is None:
-			print(f"  ✗ Pas d'epochs")
-			continue
-		print(f"  ✓ Epochs extraits ({time.time()-t0:.1f}s)")
-		
-		# Nettoyer les bad epochs avec AutoReject
-		t0 = time.time()
-		epochs = clean_epochs_autoreject(epochs)
-		print(f"  ✓ Bad epochs nettoyés ({time.time()-t0:.1f}s) - {len(epochs)} epochs")
-		
-		# Balancer et moyenner
-		t0 = time.time()
-		epochs = balance_classes(epochs)
-		X_avg, y_avg = average_over_epochs(epochs)
-		print(f"  ✓ Classes balancées et moyennées ({time.time()-t0:.1f}s) - {len(X_avg)} échantillons")
-		
-		experiment["epochs"] = epochs
-		experiment["X_avg"] = X_avg
-		experiment["y_avg"] = y_avg
-
-		# Train/Test split
-		X_train, X_test, y_train, y_test = split_train_test(X_avg, y_avg)
-		experiment["X_train"] = X_train
-		experiment["X_test"] = X_test
-		experiment["y_train"] = y_train
-		experiment["y_test"] = y_test
-
-		# Entraîner
-		t0 = time.time()
-		csp = MyCSP(n_components=4)
-		lda = LinearDiscriminantAnalysis(solver="eigen", shrinkage='auto')
-		pipeline = Pipeline([
-			("CSP", csp),
-			("LDA", lda)
-		])
-		pipeline.fit(X_train, y_train)
-		experiment["pipeline"] = pipeline
-		joblib.dump(
-			pipeline,
-			f'{experiment["name"]}.joblib'
-		)
-		print(f"  ✓ Pipeline entraîné et sauvegardé ({time.time()-t0:.1f}s)")
-		
-		# Cross-validation avec ShuffleSplit (comme le repo original)
-		t0 = time.time()
-		cv = ShuffleSplit(n_splits=10, test_size=0.2, random_state=42)
-		cv_scores = cross_val_score(pipeline, X_train, y_train, cv=cv, scoring='accuracy')
-		experiment["cv_scores"] = cv_scores
-		print(f"  ✓ Cross-validation complétée ({time.time()-t0:.1f}s)")
+		print(f"[DEBUG] Exp {exp_idx}: {count_subjects} subjects processed")
+	
+	# Afficher les moyennes
+	print(f"\nMean accuracy of the six different experiments for all 109 subjects:")
+	for exp_idx in range(len(experiments)):
+		scores = mean_scores[exp_idx]
+		if scores:
+			mean_acc = np.mean(scores)
+			print(f"experiment {exp_idx}: accuracy = {mean_acc:.4f}")
 	
 	elapsed = time.time() - start_total
-	print(f"\n✓ Traitement terminé en {elapsed/60:.1f} minutes")
-	print_results(experiments)
+	print(f"\n[OK] Traitement termine en {elapsed/60:.1f} minutes")
+
 
 
 def train(subject_id: int, run_id: int):
@@ -288,12 +292,16 @@ def train(subject_id: int, run_id: int):
 	])
 	pipeline.fit(X_train, y_train)
 	
-	# Évaluer
+	# Évaluer avec sklearn scoring tools
 	train_score = pipeline.score(X_train, y_train)
 	test_score = pipeline.score(X_test, y_test)
+	cv_scores = cross_val_score(pipeline, X_train, y_train, cv=5)
 	
-	print(f"Train: {train_score:.2f}")
-	print(f"Test:  {test_score:.2f}")
+	print(f"Train: {train_score:.4f}, Test: {test_score:.4f} (gap={train_score-test_score:.4f})")
+	print("CV scores:")
+	for i, score in enumerate(cv_scores, 1):
+		print(f"  Fold {i}: {score:.4f}")
+	print(f"cross_val_score: {cv_scores.mean():.4f}")
 	
 	# Sauvegarder
 	model_path = _model_path(subject_id, experiment["task"] if "task" in experiment else "default", run_id)
@@ -303,7 +311,7 @@ def train(subject_id: int, run_id: int):
 
 
 def predict(subject_id: int, run_id: int):
-	"""Prédit avec un modèle entraîné pour un sujet donné"""
+	"""Mode streaming: traite les epochs au fur et à mesure et affiche les prédictions en temps réel"""
 	print(f"\n=== Prédiction sujet {subject_id}, run {run_id} ===\n")
 	
 	experiment = experiments[0]
@@ -323,10 +331,38 @@ def predict(subject_id: int, run_id: int):
 		return
 	
 	X, y = raw
-	predictions = pipeline.predict(X)
-	accuracy = np.mean(predictions == y)
 	
-	print(f"Accuracy: {accuracy:.2f}")
+	# Traiter les epochs un par un (streaming)
+	correct = 0
+	predictions = []
+	
+	print(f"Traitement de {len(X)} epochs en streaming...\n")
+	start_time = time.time()
+	
+	for i, (epoch, true_label) in enumerate(zip(X, y)):
+		# Prédire sur cet epoch individuel
+		epoch_reshaped = epoch.reshape(1, *epoch.shape)  # Ajouter dimension batch
+		pred = pipeline.predict(epoch_reshaped)[0]
+		predictions.append(pred)
+		
+		# Vérifier si correct
+		is_correct = (pred == true_label)
+		correct += is_correct
+		
+		# Affichage en temps réel (chaque 5 epochs ou le dernier)
+		if (i + 1) % 5 == 0 or i == len(X) - 1:
+			elapsed = time.time() - start_time
+			accuracy_so_far = correct / (i + 1)
+			print(f"[{elapsed:.2f}s] Epoch {i+1}/{len(X)}: Prédiction={pred}, Vrai={true_label}, Accuracy=({correct}/{i+1}={accuracy_so_far:.2%})")
+	
+	# Résultats finaux
+	total_time = time.time() - start_time
+	final_accuracy = np.mean(np.array(predictions) == y)
+	
+	print(f"\n=== Résultats ===")
+	print(f"Temps total: {total_time:.2f}s")
+	print(f"Temps moyen par epoch: {total_time/len(X)*1000:.1f}ms")
+	print(f"Accuracy finale: {final_accuracy:.2%}")
 	print(f"Prédictions: {predictions[:10]}... (premières 10)")
 	print(f"Vraies valeurs: {y[:10]}... (premières 10)")
 

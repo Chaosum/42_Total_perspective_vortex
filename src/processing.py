@@ -4,7 +4,7 @@ import numpy as np
 from mne.datasets import eegbci
 from pathlib import Path
 from autoreject import AutoReject
-from utils import experiments, channels
+from utils import experiments
 
 BASE_PATH = Path(__file__).parent.parent / "src" / "data" / "MNE-eegbci-data" / "files" / "eegmmidb" / "1.0.0"
 
@@ -86,12 +86,8 @@ def clean_epochs_autoreject(epochs):
 		# Masque des epochs à garder
 		mask = amplitudes < threshold
 		
-		if np.sum(~mask) > 0:
-			print(f"    -> {np.sum(~mask)} bad epochs rejected (amplitude > {threshold:.0f} uV)")
-		
 		return epochs[mask]
 	except Exception as e:
-		print(f"  [!] Cleaning failed: {e}, continuing without cleaning")
 		return epochs
 
 def balance_classes(epochs):
@@ -100,14 +96,14 @@ def balance_classes(epochs):
 	for label in np.unique(epochs.events[:, -1]):
 		count = np.sum(epochs.events[:, -1] == label)
 		min_count = min(min_count, count)
-	
+	min_count = int(min_count)
 	indices = []
 	for label in np.unique(epochs.events[:, -1]):
 		label_indices = np.where(epochs.events[:, -1] == label)[0]
 		indices.extend(np.random.choice(label_indices, min_count, replace=False))
 	return epochs[sorted(indices)]
 
-def average_over_epochs(epochs, window_size=20, overlap=0.75):
+def average_over_epochs(epochs, window_size=5, overlap=0.5):
 	"""Crée des super-epochs en moyennant N epochs consécutifs avec chevauchement
 	
 	Args:
@@ -230,9 +226,6 @@ def setup_all_data(experiment, max_subjects=None):
 	if len(raws) == 0:
 		return None
 	
-	for raw_obj in raws:
-		raw_obj.pick(picks=channels)
-	
 	raw = raws[0]
 	for r in raws[1:]:
 		raw.append(r)
@@ -259,13 +252,11 @@ def setup_data_for_subject(experiment, subject_id):
 			raw_data.set_annotations(annotations)
 			raws.append(raw_data)
 		except Exception as e:
+			print(f"[ERROR] {subj_str} run {run}: {e}")
 			return None
 	
 	if len(raws) == 0:
 		return None
-	
-	for raw_obj in raws:
-		raw_obj.pick(picks=channels)
 	
 	raw = raws[0]
 	for r in raws[1:]:
